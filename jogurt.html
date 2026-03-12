@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Интерактивная Таблица Менделеева</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #fcfcfc;
+            --text-color: #111;
+            --modal-bg: rgba(255, 255, 255, 0.98);
+            --accent: #ffb300;
+            --border-radius: 12px;
+            --font-main: 'Montserrat', sans-serif;
+            
+            /* Цвета по категориям из картинки */
+            --c-nonmetal: #9effa0;
+            --c-noble: #b3f0f0;
+            --c-alkali: #ff6b6b;
+            --c-alkaline: #ffcc99;
+            --c-transition: #ffb3b3;
+            --c-post-transition: #cccccc;
+            --c-metalloid: #d4d085;
+            --c-halogen: #ffff99;
+            --c-lanthanide: #eea1ff;
+            --c-actinide: #ff80b3;
+        }
+
+        body {
+            margin: 0;
+            font-family: var(--font-main);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            text-align: center;
+            padding: 15px 10px 5px 10px;
+            flex-shrink: 0;
+        }
+
+        h1 { margin: 0 0 5px 0; font-weight: 600; font-size: 1.8rem; }
+        .subtitle { color: #666; font-size: 0.85rem; margin: 0; }
+
+        /* Контейнер для скроллинга на мобильных */
+        .table-wrapper {
+            flex-grow: 1;
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 10px 20px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        /* Сетка: 19 колонок (1 для нумерации рядов + 18 для групп)
+           11 строк (1 для групп, 7 для периодов, 1 отступ, 2 для лантаноидов/актиноидов)
+        */
+        .periodic-table {
+            display: grid;
+            grid-template-columns: 40px repeat(18, minmax(45px, 1fr));
+            grid-template-rows: 30px repeat(7, 1fr) 20px repeat(2, 1fr);
+            gap: 4px;
+            width: 100%;
+            min-width: 950px; 
+            max-width: 1400px;
+            margin: auto;
+            padding-bottom: 30px;
+        }
+
+        /* Названия групп и периодов */
+        .grid-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            color: #333;
+        }
+        .row-header { justify-content: center; font-size: 1.1rem; }
+        .block-label {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 15px;
+            font-size: 0.9rem;
+            color: #333;
+        }
+
+        .element {
+            border: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            aspect-ratio: 1 / 1.1;
+            position: relative;
+        }
+
+        .element:hover {
+            transform: scale(1.15);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            z-index: 10;
+        }
+
+        .el-number { font-size: 0.7rem; position: absolute; top: 3px; left: 4px; color: #111; }
+        .el-symbol { font-size: 1.1rem; font-weight: 500; margin-top: 6px; }
+        .el-name { font-size: 0.55rem; opacity: 0; position: absolute; bottom: 2px; } /* Скрыто по умолчанию */
+
+        /* Цвета */
+        .cat-nonmetal { background-color: var(--c-nonmetal); }
+        .cat-noble { background-color: var(--c-noble); }
+        .cat-alkali { background-color: var(--c-alkali); }
+        .cat-alkaline { background-color: var(--c-alkaline); }
+        .cat-metalloid { background-color: var(--c-metalloid); }
+        .cat-halogen { background-color: var(--c-halogen); }
+        .cat-post-transition { background-color: var(--c-post-transition); }
+        .cat-transition { background-color: var(--c-transition); }
+        .cat-lanthanide { background-color: var(--c-lanthanide); }
+        .cat-actinide { background-color: var(--c-actinide); }
+
+        /* Заглушки в основной таблице */
+        .gap-lanthanides { background-color: #ffbaff; border: 1px solid #444; pointer-events: none; }
+        .gap-actinides { background-color: #ff99cc; border: 1px solid #444; pointer-events: none; }
+
+        /* Модальное окно */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: var(--modal-bg);
+            padding: 30px;
+            border-radius: 16px;
+            max-width: 800px; /* Увеличено с 600px */
+            width: 95%; /* Чуть шире на мобильных */
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 2rem;
+            cursor: pointer;
+            color: #888;
+            transition: color 0.2s;
+            line-height: 1;
+            z-index: 10;
+        }
+        
+        .close-btn:hover { color: var(--accent); }
+
+        #element-3d-container {
+            width: 100%;
+            height: 400px; /* Увеличено с 250px */
+            background: #f1f1f1;
+            border-radius: 12px;
+            margin: 15px 0;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid #ccc;
+        }
+
+        .info-block { line-height: 1.6; color: #333; font-size: 1.05rem; } /* Немного увеличил шрифт описания */
+        .info-block p { margin: 10px 0; }
+        .info-block strong { color: #111; font-weight: 600; display: block; margin-bottom: 2px;}
+
+        /* Адаптация */
+        @media (max-width: 768px) {
+            h1 { font-size: 1.4rem; }
+            .subtitle { font-size: 0.75rem; }
+            .modal-content { padding: 20px; width: 95%; }
+            #element-3d-container { height: 300px; } /* Увеличено с 200px для мобильных */
+            .info-block { font-size: 0.95rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Таблица Менделеева</h1>
+        <p class="subtitle">Используйте свайп влево/вправо на телефоне</p>
+    </div>
+
+    <div class="table-wrapper">
+        <div class="periodic-table" id="ptable">
+            </div>
+    </div>
+
+    <div class="modal-overlay" id="element-modal">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal('element-modal')">&times;</button>
+            <h2 id="modal-title" style="margin-top:0; margin-bottom:5px;">Элемент</h2>
+            <div id="element-3d-container"></div>
+            <div class="info-block">
+                <p><strong>Описание:</strong> <span id="el-desc"></span></p>
+                <p><strong>Применение:</strong> <span id="el-uses"></span></p>
+                <p><strong>Кто открыл:</strong> <span id="el-disc"></span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ptable = document.getElementById('ptable');
+
+        // 1. Отрисовка заголовков групп (1-18)
+        for(let g = 1; g <= 18; g++) {
+            let div = document.createElement('div');
+            div.className = 'grid-header';
+            div.style.gridColumn = g + 1;
+            div.style.gridRow = 1;
+            div.innerText = g;
+            ptable.appendChild(div);
+        }
+
+        // 2. Отрисовка заголовков периодов (1-7)
+        for(let p = 1; p <= 7; p++) {
+            let div = document.createElement('div');
+            div.className = 'grid-header row-header';
+            div.style.gridColumn = 1;
+            div.style.gridRow = p + 1;
+            div.innerText = p;
+            ptable.appendChild(div);
+        }
+
+        // Подписи для нижних блоков
+        const lLabel = document.createElement('div');
+        lLabel.className = 'block-label';
+        lLabel.style.gridRow = 10; lLabel.style.gridColumn = "1 / 5";
+        lLabel.innerText = "Лантаноиды";
+        ptable.appendChild(lLabel);
+
+        const aLabel = document.createElement('div');
+        aLabel.className = 'block-label';
+        aLabel.style.gridRow = 11; aLabel.style.gridColumn = "1 / 5";
+        aLabel.innerText = "Актиноиды";
+        ptable.appendChild(aLabel);
+
+        // Заглушки
+        const gapL = document.createElement('div');
+        gapL.className = 'gap-lanthanides';
+        gapL.style.gridRow = 7; gapL.style.gridColumn = 4;
+        ptable.appendChild(gapL);
+
+        const gapA = document.createElement('div');
+        gapA.className = 'gap-actinides';
+        gapA.style.gridRow = 8; gapA.style.gridColumn = 4;
+        ptable.appendChild(gapA);
+
+        // База всех 118 символов
+        const syms = ["H","He","Li","Be","B","C","N","O","F","Ne","Na","Mg","Al","Si","P","S","Cl","Ar","K","Ca","Sc","Ti","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","Ga","Ge","As","Se","Br","Kr","Rb","Sr","Y","Zr","Nb","Mo","Tc","Ru","Rh","Pd","Ag","Cd","In","Sn","Sb","Te","I","Xe","Cs","Ba","La","Ce","Pr","Nd","Pm","Sm","Eu","Gd","Tb","Dy","Ho","Er","Tm","Yb","Lu","Hf","Ta","W","Re","Os","Ir","Pt","Au","Hg","Tl","Pb","Bi","Po","At","Rn","Fr","Ra","Ac","Th","Pa","U","Np","Pu","Am","Cm","Bk","Cf","Es","Fm","Md","No","Lr","Rf","Db","Sg","Bh","Hs","Mt","Ds","Rg","Cn","Nh","Fl","Mc","Lv","Ts","Og"];
+
+        // Распределение по категориям строго по картинке
+        const categories = {
+            nonmetal: [1, 6, 7, 8, 15, 16, 34],
+            noble: [2, 10, 18, 36, 54, 86, 118],
+            alkali: [3, 11, 19, 37, 55, 87],
+            alkaline: [4, 12, 20, 38, 56, 88],
+            metalloid: [5, 14, 32, 33, 51, 52, 84],
+            halogen: [9, 17, 35, 53, 85, 117],
+            post_transition: [13, 31, 49, 50, 81, 82, 83, 113, 114, 115, 116]
+        };
+
+        function getCategory(n) {
+            for (const cat in categories) {
+                if (categories[cat].includes(n)) return cat;
+            }
+            if (n >= 57 && n <= 71) return 'lanthanide';
+            if (n >= 89 && n <= 103) return 'actinide';
+            return 'transition';
+        }
+
+        const elements = syms.map((sym, i) => {
+            let n = i + 1;
+            let c = getCategory(n);
+            let row, col;
+
+            if (n >= 57 && n <= 71) {
+                row = 10; 
+                col = (n - 57) + 4 + 1;
+            } else if (n >= 89 && n <= 103) {
+                row = 11;
+                col = (n - 89) + 4 + 1;
+            } else {
+                let p = n <= 2 ? 1 : n <= 10 ? 2 : n <= 18 ? 3 : n <= 36 ? 4 : n <= 54 ? 5 : n <= 86 ? 6 : 7;
+                row = p + 1;
+
+                let g;
+                if (p === 1) g = (n === 1) ? 1 : 18;
+                else if (p === 2 || p === 3) { let pos = n - (p === 2 ? 2 : 10); g = (pos <= 2) ? pos : pos + 10; } 
+                else if (p === 4 || p === 5) { g = n - (p === 4 ? 18 : 36); } 
+                else if (p === 6) { g = (n <= 56) ? n - 54 : n - 68; } 
+                else if (p === 7) { g = (n <= 88) ? n - 86 : n - 100; }
+                
+                col = g + 1;
+            }
+
+            return { n, sym, name: `Элемент ${n}`, col, row, cat: c };
+        });
+
+        // Данные элементов
+        const detailsData = {
+            1: { desc: "Самый легкий, простой и распространенный элемент.", uses: "Водородное топливо, синтез аммиака.", disc: "Г. Кавендиш" },
+            6: { desc: "Основа органической химии.", uses: "Уголь, алмазы, основа жизни.", disc: "Известен с древности" },
+            8: { desc: "Необходим для дыхания и процессов горения.", uses: "Медицина, металлургия.", disc: "Дж. Пристли" }
+        };
+
+        // 3. Создание блоков элементов в DOM
+        elements.forEach(data => {
+            const el = document.createElement('div');
+            el.className = `element cat-${data.cat}`;
+            el.style.gridColumn = data.col;
+            el.style.gridRow = data.row;
+            el.innerHTML = `
+                <div class="el-number">${data.n}</div>
+                <div class="el-symbol">${data.sym}</div>
+                <div class="el-name">${data.name}</div>
+            `;
+            el.onclick = () => openElement(data.n, data.sym, data.name);
+            ptable.appendChild(el);
+        });
+
+        // --- 3D Движок ---
+        let sceneElement, cameraElement, rendererElement, animElementId;
+        const containerElement = document.getElementById('element-3d-container');
+        const loader = new THREE.TextureLoader();
+        const textureImage = 'image.png'; // Текстура ядра
+
+        function init3DElement(atomicNumber) {
+            if(sceneElement) {
+                cancelAnimationFrame(animElementId);
+                containerElement.innerHTML = '';
+            }
+
+            sceneElement = new THREE.Scene();
+            cameraElement = new THREE.PerspectiveCamera(45, containerElement.clientWidth / containerElement.clientHeight, 0.1, 1000);
+            rendererElement = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            rendererElement.setSize(containerElement.clientWidth, containerElement.clientHeight);
+            containerElement.appendChild(rendererElement.domElement);
+
+            sceneElement.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+            // Ядро-картинка на диске
+            let nucleusMesh;
+            loader.load(textureImage, 
+                function(map) {
+                    const nucleusMaterial = new THREE.MeshBasicMaterial({ map: map, side: THREE.DoubleSide });
+                    // Увеличили радиус диска (с 2.0 до 3.0), чтобы ядро было больше
+                    nucleusMesh = new THREE.Mesh(new THREE.CircleGeometry(3.0, 64), nucleusMaterial);
+                    sceneElement.add(nucleusMesh);
+                },
+                undefined,
+                function() {
+                    const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+                    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.arc(32, 32, 30, 0, Math.PI * 2); ctx.fill();
+                    const tex = new THREE.CanvasTexture(canvas);
+                    const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+                    nucleusMesh = new THREE.Mesh(new THREE.CircleGeometry(2.5, 64), mat);
+                    sceneElement.add(nucleusMesh);
+                }
+            );
+
+            // Электроны
+            const electrons = [];
+            const numElectrons = Math.min(atomicNumber, 118); 
+            for(let i = 0; i < numElectrons; i++) {
+                const elMat = new THREE.MeshPhongMaterial({ color: 0x333333, emissive: 0x111111 });
+                // Электроны тоже немного увеличены (радиус с 0.12 до 0.18)
+                const electron = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), elMat);
+                // Орбиты пропорционально отдалены, чтобы не пересекать большое ядро
+                const distance = 4 + (Math.floor(i/8) * 0.9); 
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 0.01 + (Math.random() * 0.02) * (i % 2 === 0 ? 1 : -1);
+                const axis = new THREE.Vector3(Math.random(), Math.random(), Math.random()).normalize();
+
+                electrons.push({ mesh: electron, dist: distance, ang: angle, spd: speed, axis: axis });
+                sceneElement.add(electron);
+            }
+
+            cameraElement.position.z = 15 + (numElectrons * 0.05);
+
+            function animate() {
+                animElementId = requestAnimationFrame(animate);
+                
+                if(nucleusMesh) {
+                    nucleusMesh.rotation.y += 0.005;
+                }
+
+                electrons.forEach(e => {
+                    e.ang += e.spd;
+                    const x = Math.cos(e.ang) * e.dist;
+                    const y = Math.sin(e.ang) * e.dist;
+                    const pos = new THREE.Vector3(x, y, 0);
+                    pos.applyAxisAngle(e.axis, e.ang * 0.5); 
+                    e.mesh.position.copy(pos);
+                });
+                rendererElement.render(sceneElement, cameraElement);
+            }
+            animate();
+        }
+
+        function openElement(num, sym, name) {
+            document.getElementById('modal-title').innerText = `${num} - ${sym}`;
+            const info = detailsData[num] || {desc: "Описание элемента.", uses: "Применение.", disc: "История открытия"};
+            document.getElementById('el-desc').innerText = info.desc;
+            document.getElementById('el-uses').innerText = info.uses;
+            document.getElementById('el-disc').innerText = info.disc;
+            document.getElementById('element-modal').style.display = 'flex';
+            setTimeout(() => init3DElement(num), 100);
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+            if(id === 'element-modal' && animElementId) cancelAnimationFrame(animElementId);
+        }
+
+        window.onclick = function(e) { 
+            if (e.target.classList.contains('modal-overlay')) closeModal(e.target.id); 
+        }
+        
+        window.addEventListener('resize', () => { 
+            if(document.getElementById('element-modal').style.display === 'flex' && sceneElement) {
+                cameraElement.aspect = containerElement.clientWidth / containerElement.clientHeight;
+                cameraElement.updateProjectionMatrix();
+                rendererElement.setSize(containerElement.clientWidth, containerElement.clientHeight);
+            }
+        });
+    </script>
+</body>
+</html>
